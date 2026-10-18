@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# anime-migrate v2: 把做种结束（已从 qBittorrent 移除）的番剧迁移至 OSS
+# anime-migrate v3: 把做种结束（qB 暂停或已移除）的番剧迁移至 OSS
 # 逻辑：每 INTERVAL 秒扫描一次本地 /Media：
-#   1. 通过 qBittorrent API（API Key 认证）获取"仍在任务列表中的种子"占用的路径（做种保护）
+#   1. 通过 qBittorrent API（API Key 认证）获取"仍在活跃状态（下载/做种/异常）"
+#      的种子占用的路径（做种保护）；做种限制触发的暂停态不保护
 #      三重来源：content_path；content_path 缺失时用 save_path 与 save_path/name 兜底
 #   2. 空列表不采信：60s 后复核，两次都空才认定"真的没有种子"
 #      （防 qB 重启后 WebUI 先就绪、种子列表未加载完成的假空——v1 误迁的主因）
 #   3. 找出超过 MIN_AGE_MIN 分钟无变动、且不受任何种子保护的视频/字幕文件
+#      MIN_AGE_MIN 是文件无变动保护期：15min 已远大于 ani-rss 完成检测的
+#      实际延迟（分钟级），且通知链路的稳定性由"种子保持在 qB 列表"保证，
+#      与文件何时迁移无关——故取 15 兼顾及时与稳定
 #   4. 每个文件迁移前再实时复核一次 qB 列表（关闭轮内时序竞态窗口）
 #   5. rclone moveto 上传至 OSS（上传校验成功后 rclone 才会删除本地文件）
 #   6. 清理空目录
@@ -36,14 +40,21 @@ fetch_protected() {
     return 1
   fi
 
+  # 整个列表为空才走"假空复核"（qB 重启后列表未加载完的防护，v1 误迁主因）
   if [ "$(echo "$resp" | jq 'length')" -eq 0 ]; then
     echo "EMPTY_OK"
     return 0
   fi
 
-  # 三重保护来源（fail-closed：宁可多保护，绝不漏保护）
+  # 只保护"活跃"种子（fail-closed：宁可多保护，绝不漏保护）
+  #   保护：下载中/做种中/上传中 + error/missingFiles/checking* 等异常状态
+  #   不保护：stopped/stoppedUP（兼容旧版 paused*）——qB 做种限制
+  #           "分享率达标 -> 暂停"即做种结束，文件解除保护、允许迁移
+  #   注：列表非空但全部暂停时此处输出为空 = 合法的"零保护"
+  #       （"假空复核"只针对整表为空，两者不混淆）
   echo "$resp" | jq -r '
     .[] |
+    select((.state // "") | test("^(stopped|paused)") | not) |
       (.content_path // empty),
       (if (.content_path // "") == "" then (.save_path // empty) else empty end),
       (if (.content_path // "") == "" then ((.save_path // "") + "/" + (.name // "")) else empty end)
@@ -63,7 +74,7 @@ is_protected() {
   return 1
 }
 
-log "anime-migrate v2 启动: 本地目录=${LOCAL_ROOT} 远程=${REMOTE} 扫描间隔=${INTERVAL}s 保护期=${MIN_AGE_MIN}min 演练模式=${DRY_RUN}"
+log "anime-migrate v3 启动: 本地目录=${LOCAL_ROOT} 远程=${REMOTE} 扫描间隔=${INTERVAL}s 保护期=${MIN_AGE_MIN}min 演练模式=${DRY_RUN}"
 
 while true; do
   EMPTY_CONFIRMED=0
