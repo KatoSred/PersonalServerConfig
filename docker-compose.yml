@@ -160,8 +160,8 @@ services:
       - QBT_API_KEY=${QBT_API_KEY}
       - REMOTE=${OSS_REMOTE}
       - LOCAL_ROOT=/Media
-      - MIN_AGE_MIN=15
-      - INTERVAL=600
+      - MIN_AGE_MIN=5
+      - INTERVAL=300
     volumes:
       - /opt/anime-server/rclone:/config/rclone
       - /opt/anime-server/media:/Media
