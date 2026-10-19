@@ -10,6 +10,7 @@ services:
     privileged: true
     network_mode: host
     environment:
+      - TZ=Asia/Shanghai
       - V2RAYA_LOG_FILE=/tmp/v2raya.log
       - V2RAYA_V2RAY_BIN=/usr/bin/v2raya_core
       - V2RAYA_NFTABLES_SUPPORT=off
@@ -26,13 +27,13 @@ services:
     restart: always
     network_mode: host
     environment:
+      - TZ=Asia/Shanghai
       - QBT_LEGAL_NOTICE=confirm
       - QBT_WEBUI_PORT=8080
       - QBT_TORRENTING_PORT=6881
       - PUID=0
       - PGID=0
       - UMASK=022
-      - TZ=Asia/Shanghai
     stop_grace_period: 30m
     volumes:
       - /opt/anime-server/qbittorrent/config:/config
@@ -45,12 +46,12 @@ services:
     restart: always
     network_mode: host
     environment:
+      - TZ=Asia/Shanghai
       - PUID=0
       - PGID=0
       - UMASK=022
       - SERVER_PORT=7789
       - CONFIG=/config
-      - TZ=Asia/Shanghai
       - SWAGGER_ENABLED=false
       - MCP_ENABLED=false
       - JAVA_OPTS=-Xms64m -Xmx384m -Xss256k -XX:+UseG1GC
@@ -67,9 +68,9 @@ services:
     restart: always
     network_mode: host
     environment:
+      - TZ=Asia/Shanghai
       - PUID=1000
       - PGID=1000
-      - TZ=Asia/Shanghai
     volumes:
       - /opt/anime-server/bangumi-syncer/config:/app/config
       - /opt/anime-server/bangumi-syncer/logs:/app/logs
@@ -83,6 +84,7 @@ services:
     network_mode: host
     user: "0:0"
     environment:
+      - TZ=Asia/Shanghai
       - FB_PORT=8081
     volumes:
       - /opt/anime-server/filebrowser:/database
@@ -110,6 +112,7 @@ services:
     security_opt:
       - apparmor:unconfined
     environment:
+      - TZ=Asia/Shanghai
       - RCLONE_CONFIG=/config/rclone/rclone.conf
     volumes:
       - /opt/anime-server/rclone:/config/rclone
@@ -130,6 +133,7 @@ services:
     restart: always
     network_mode: host
     environment:
+      - TZ=Asia/Shanghai
       - RCLONE_CONFIG=/config/rclone/rclone.conf
     volumes:
       - /opt/anime-server/rclone:/config/rclone
@@ -150,6 +154,7 @@ services:
     restart: always
     network_mode: host
     environment:
+      - TZ=Asia/Shanghai
       - RCLONE_CONFIG=/config/rclone/rclone.conf
       - QB_URL=http://127.0.0.1:8080
       - QBT_API_KEY=${QBT_API_KEY}
