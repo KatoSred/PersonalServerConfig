@@ -42,6 +42,8 @@ OSS_REMOTE=
 PUBLIC_IP=
 # BGM用户名
 BANGUMI_USER=
+# Server酱³ 迁移通知 API URL
+SC_API_URL=
 ```
 
 ### rclone/rclone.conf 模板
