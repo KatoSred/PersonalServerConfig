@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# anime-migrate v3: 把做种结束（qB 暂停或已移除）的番剧迁移至 OSS
+# anime-migrate v3.1: 把做种结束（qB 暂停或已移除）的番剧迁移至 OSS
 # 逻辑：每 INTERVAL 秒扫描一次本地 /Media：
 #   1. 通过 qBittorrent API（API Key 认证）获取"仍在活跃状态（下载/做种/异常）"
 #      的种子占用的路径（做种保护）；做种限制触发的暂停态不保护
@@ -7,12 +7,14 @@
 #   2. 空列表不采信：60s 后复核，两次都空才认定"真的没有种子"
 #      （防 qB 重启后 WebUI 先就绪、种子列表未加载完成的假空——v1 误迁的主因）
 #   3. 找出超过 MIN_AGE_MIN 分钟无变动、且不受任何种子保护的视频/字幕文件
-#      MIN_AGE_MIN 是文件无变动保护期：15min 已远大于 ani-rss 完成检测的
-#      实际延迟（分钟级），且通知链路的稳定性由"种子保持在 qB 列表"保证，
-#      与文件何时迁移无关——故取 15 兼顾及时与稳定
+#      MIN_AGE_MIN 是文件无变动保护期：5min（环境变量可调）已覆盖完成检测、
+#      通知发送的全部时序余量，且通知链路的稳定性由"种子保持在 qB 列表"保证，
+#      与文件何时迁移无关
 #   4. 每个文件迁移前再实时复核一次 qB 列表（关闭轮内时序竞态窗口）
 #   5. rclone moveto 上传至 OSS（上传校验成功后 rclone 才会删除本地文件）
 #   6. 清理空目录
+#   7. 本轮有迁移动作且配置了 SC_API_URL 时，聚合发送一条 Server酱³通知
+#      （成功/失败清单各一节；未配置则完全静默）
 # DRY_RUN=1 时为演练模式：只打印将迁移的文件，不实际迁移
 set -u
 
@@ -23,6 +25,7 @@ LOCAL_ROOT="${LOCAL_ROOT:-/Media}"
 MIN_AGE_MIN="${MIN_AGE_MIN:-15}"
 INTERVAL="${INTERVAL:-600}"
 DRY_RUN="${DRY_RUN:-0}"
+SC_API_URL="${SC_API_URL:-}"   # Server酱³ API URL（可选；后台完整复制 https://<UID>.push.ft07.com/send/<SendKey>.send，留空则不发迁移通知）
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
@@ -74,7 +77,8 @@ is_protected() {
   return 1
 }
 
-log "anime-migrate v3 启动: 本地目录=${LOCAL_ROOT} 远程=${REMOTE} 扫描间隔=${INTERVAL}s 保护期=${MIN_AGE_MIN}min 演练模式=${DRY_RUN}"
+if [ -n "$SC_API_URL" ]; then SC_NOTE="启用"; else SC_NOTE="关闭"; fi
+log "anime-migrate v3.1 启动: 本地目录=${LOCAL_ROOT} 远程=${REMOTE} 扫描间隔=${INTERVAL}s 保护期=${MIN_AGE_MIN}min 演练模式=${DRY_RUN} Server酱通知=${SC_NOTE}"
 
 while true; do
   EMPTY_CONFIRMED=0
@@ -101,6 +105,10 @@ while true; do
   fi
 
   log "本轮保护路径条目数: $(printf '%s\n' "$PROTECTED" | grep -c .)"
+
+  # 本轮迁移结果收集（供聚合通知用；演练模式不写入）
+  DONE_LIST=$(mktemp)
+  FAIL_LIST=$(mktemp)
 
   find "$LOCAL_ROOT" -type f \
     ! -path "*/.incomplete/*" \
@@ -143,13 +151,35 @@ while true; do
            --transfers 1 --retries 3 --low-level-retries 5 \
            --stats 0 --log-level NOTICE; then
         log "完成: ${rel}"
+        echo "${rel}" >> "$DONE_LIST"
       else
         log "ERROR: 迁移失败(将保留本地文件等待下次重试): ${f}"
+        echo "${f}" >> "$FAIL_LIST"
       fi
     done
 
   # 清理空目录（保留 /Media 本身和顶层 anime/movie 目录）
   find "$LOCAL_ROOT" -mindepth 2 -type d -empty -delete 2>/dev/null
+
+  # 聚合发送 Server酱³通知（仅本轮有迁移动作且已配置 API URL 时）
+  if [ -n "$SC_API_URL" ] && { [ -s "$DONE_LIST" ] || [ -s "$FAIL_LIST" ]; }; then
+    DONE_N=$(wc -l < "$DONE_LIST")
+    FAIL_N=$(wc -l < "$FAIL_LIST")
+    DESC_BODY=""
+    if [ -s "$DONE_LIST" ]; then
+      DESC_BODY="$(printf '**本轮成功迁移 %s 个文件：**\n\n%s\n\n' "$DONE_N" "$(sed 's/^/- /' "$DONE_LIST")")"
+    fi
+    if [ -s "$FAIL_LIST" ]; then
+      DESC_BODY="${DESC_BODY}$(printf '**本轮迁移失败 %s 个（本地已保留，下轮自动重试）：**\n\n%s\n' "$FAIL_N" "$(sed 's/^/- /' "$FAIL_LIST")")"
+    fi
+    curl -s -m 10 -X POST "${SC_API_URL}" \
+      --data-urlencode "title=番剧迁移：成功 ${DONE_N} / 失败 ${FAIL_N}" \
+      --data-urlencode "desp=${DESC_BODY}" >/dev/null \
+      --data-urlencode "tags=migrate" >/dev/null \
+      && log "已发送 Server酱迁移通知（成功 ${DONE_N} / 失败 ${FAIL_N}）" \
+      || log "WARN: Server酱通知发送失败（不影响迁移本身）"
+  fi
+  rm -f "$DONE_LIST" "$FAIL_LIST"
 
   sleep "$INTERVAL"
 done
